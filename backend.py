@@ -1,14 +1,15 @@
 # from fastapi import FastAPI, Body
 # import uvicorn
 import numpy as np
-import joblib
 from sklearn.preprocessing import MinMaxScaler
 import paho.mqtt.client as mqtt
 from datetime import datetime
 import re
+import pickle
+import pandas as pd
+import json
 
-model = joblib.load("./model.pkl")
-scaler_params = joblib.load('./scaler_params.pkl')
+model = pickle.load(open('./model.pkl', 'rb'))
 
 RAW_DATA_TOPIC = "raw_data"
 RESULT_DATA_TOPIC = "result_topic"
@@ -80,16 +81,24 @@ def produce_result(client):
     global temp
 
     if time_scaled != None and light != None and hum != None and temp != None:
-        input = {"time_scaled": time_scaled, "temp": temp, "hum": hum, "light": light}
-        
-        # do scaling to input, but how??
-        # scaler = MinMaxScaler(**scaler_params)
-        # scaled_input = scaler.transform([[input['temp'], input['hum'], input['light']]])
-        # print(scaled_input)
+        input_df = pd.DataFrame({'Temp': [temp], 'Hum': [hum], 'Light': [light]})
+        input_df = input_df.reindex(columns=['Hum', 'Light', 'Temp'])
 
-        data = np.array([[time_scaled, temp, hum, light]])
-        prediction = model.predict(data)
-        client.publish(RESULT_DATA_TOPIC, str(prediction))
+        prediction = model.predict(input_df)
+        print("Prediction:", prediction)
+
+        class_probabilities = model.predict_proba(input_df)
+        confidence = np.max(class_probabilities)
+        print("Confidence:", confidence)
+
+        data = {
+            "prediction_value": str(prediction[0]),
+            "confidence_value": str(confidence )
+        }
+
+        json_payload = json.dumps(data)
+
+        client.publish(RESULT_DATA_TOPIC, json_payload) # Sends either "0" or "1"
 
         time_scaled = None
         light = None
@@ -100,7 +109,7 @@ client = mqtt.Client()
 client.on_connect = on_connect
 client.on_message = on_message
 
-client.connect("0.tcp.ap.ngrok.io", 15000, 60)
+client.connect("0.tcp.ap.ngrok.io", 12993, 60)
 client.loop_forever()
 
 # app = FastAPI()
